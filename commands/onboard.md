@@ -214,6 +214,8 @@ AskUserQuestion:
       description: "The default: every task ends with its own commit — fine-grained history, per-task rollback. Nothing is written."
     - label: "Single commit at plan end"
       description: "Tasks leave changes uncommitted; one final plan task commits the full implementation as a single commit."
+    - label: "Only with my approval"
+      description: "Nothing is committed automatically. At plan end the agent asks you, with a proposed message, and commits only on yes."
 ```
 
 - **Per-task commits** → write nothing (an absent file already means per-task).
@@ -223,7 +225,13 @@ AskUserQuestion:
   {"commitStrategy": "at-end"}
   ```
 
-After writing the file, tell the user: the plan-time side is enforced by a TaskCreate gate that blocks per-task commit steps in plan tasks (dispatch time stays advisory); delivery starts at the next session (the current session keeps per-task behavior). Off-switch: delete the file, or remove the `commitStrategy` key; runtime kill switch: `SUPERPOWERS_WORKFLOW_GUARD=0`.
+- **Only with my approval** → write `workflow.json` to the scope's config target with this content:
+
+  ```json
+  {"commitStrategy": "only-by-user-approval"}
+  ```
+
+After writing the file, tell the user: the plan-time side is enforced by a TaskCreate gate that blocks commit steps in plan tasks (dispatch time stays advisory); delivery starts at the next session (the current session keeps per-task behavior). Off-switch: delete the file, or remove the `commitStrategy` key; runtime kill switch: `SUPERPOWERS_WORKFLOW_GUARD=0`.
 
 Then ask one follow-up in the same feature:
 

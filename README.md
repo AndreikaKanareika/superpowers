@@ -23,7 +23,7 @@ This fork integrates Claude Code-native features into the Superpowers workflow.
 | Pre-commit Task Gate | Plugin hook blocks `git commit` when tasks are incomplete |
 | User-Thrown Gate Enforcement | `userGate` / `user-gate` tag + opt-in hooks force re-validation when Claude closes a user-ordered verification task (see [Recommended Configuration](#recommended-configuration)) |
 | Subagent Model Routing | Opt-in per-task model tiers (`mechanical`/`standard`/`frontier`) route plan-execution subagents to cheaper models (see [Subagent Model Routing](#subagent-model-routing--optional-flow)) |
-| Configurable Commit Strategy | Opt-in `workflow.json` switches plan execution from per-task commits to a single commit at plan end (see [Commit Strategy](#commit-strategy)) |
+| Configurable Commit Strategy | Opt-in `workflow.json` switches plan execution from per-task commits to a single commit at plan end, or to committing only with user approval (see [Commit Strategy](#commit-strategy)) |
 
 ## Visual Comparison
 
@@ -264,12 +264,14 @@ When `at-end` is set, a notice injected at session start instructs the agent to:
 - end every plan with one final task — "Commit the full implementation" — blocked by all implementation tasks;
 - tell implementer subagents not to commit (the coordinator runs that final task, making the single commit), with reviewers reading the uncommitted working-tree diff.
 
+Projects that want no commit to happen without a human saying so can set `{"commitStrategy": "only-by-user-approval"}` instead. Plans then carry no commit steps and no final commit task, nobody commits during execution, and when the plan is complete the agent asks the user — with a proposed commit message and the changed files — committing only on an explicit yes.
+
 Setup notes:
 
 - Prefer a guided setup? Run `/superpowers-extended-cc:onboard` — it covers this feature alongside the other optional flows.
-- Valid values are `"per-task"` (the default) and `"at-end"`; anything else falls back to per-task.
+- Valid values are `"per-task"` (the default), `"at-end"` and `"only-by-user-approval"`; anything else falls back to per-task.
 - **User-level default:** the file may instead live at `~/.claude/superpowers/workflow.json`, applying to every project that has no project-level file. Lookup is project first, then user — the first file found wins entirely (no merging). A project file of `{"commitStrategy": "per-task"}` restores per-task commits for that project while a user-level default exists.
-- The plan-time side is enforced: a TaskCreate gate blocks plan tasks that carry per-task commit steps while `at-end` is configured (fail-open, kill switch `SUPERPOWERS_WORKFLOW_GUARD=0`). Dispatch-time stays advisory, and the notice takes effect from the next session on (see the design doc for this boundary).
+- The plan-time side is enforced: a TaskCreate gate blocks plan tasks that carry commit steps while `at-end` or `only-by-user-approval` is configured (fail-open, kill switch `SUPERPOWERS_WORKFLOW_GUARD=0`). Dispatch-time stays advisory, and the notice takes effect from the next session on (see the design doc for this boundary).
 - Undo: delete the file or remove the `commitStrategy` key — per-task commits resume at the next session start.
 
 ---

@@ -100,6 +100,13 @@ cat > "$PERTASK/docs/superpowers/workflow.json" <<'EOF'
 {"commitStrategy": "per-task"}
 EOF
 
+# Project with only-by-user-approval.
+APPROVAL="$WORK/approval"
+mkdir -p "$APPROVAL/docs/superpowers"
+cat > "$APPROVAL/docs/superpowers/workflow.json" <<'EOF'
+{"commitStrategy": "only-by-user-approval"}
+EOF
+
 # Project with unparseable workflow file.
 BADPROJ="$WORK/badproject"
 mkdir -p "$BADPROJ/docs/superpowers"
@@ -242,6 +249,41 @@ DESC_BARE_PROSE=$'**Goal:** document the at-end rule.\n\n**Acceptance Criteria:*
 INPUT=$(make_input "TaskCreate" "Task 4: Docs" "$DESC_BARE_PROSE" "$PROJ")
 rc=$(run_hook "$INPUT")
 assert "bare git commit instruction still blocks" "2" "$rc"
+echo ""
+
+echo "Test 19: only-by-user-approval + '**Step N: Commit**' heading → block"
+INPUT=$(make_input "TaskCreate" "Task 1: Widget" "$DESC_STEP_COMMIT" "$APPROVAL")
+rc=$(run_hook "$INPUT")
+assert "exit code" "2" "$rc"
+assert_stderr_contains "headline present" "only-by-user-approval strategy active"
+assert_stderr_contains "tells agent to ask the user" "ASK the user"
+echo ""
+
+echo "Test 20: only-by-user-approval + bare git commit → block"
+INPUT=$(make_input "TaskCreate" "Migrate the files" "$DESC_GIT_COMMIT" "$APPROVAL")
+rc=$(run_hook "$INPUT")
+assert "exit code" "2" "$rc"
+echo ""
+
+echo "Test 21: only-by-user-approval + 'Commit the full implementation' → block (no exemption)"
+INPUT=$(make_input "TaskCreate" "Task 12: Commit the full implementation" "$DESC_GIT_COMMIT" "$APPROVAL")
+rc=$(run_hook "$INPUT")
+assert "final commit task is NOT exempt" "2" "$rc"
+echo ""
+
+echo "Test 22: only-by-user-approval + clean / ad-hoc tasks → allow"
+INPUT=$(make_input "TaskCreate" "Task 1: Widget" "$DESC_CLEAN" "$APPROVAL")
+rc=$(run_hook "$INPUT")
+assert "clean plan task allows" "0" "$rc"
+INPUT=$(make_input "TaskCreate" "unstick the repo" "$DESC_ADHOC_COMMIT" "$APPROVAL")
+rc=$(run_hook "$INPUT")
+assert "ad-hoc task allows" "0" "$rc"
+echo ""
+
+echo "Test 23: only-by-user-approval + kill switch → allow"
+INPUT=$(make_input "TaskCreate" "Task 1: Widget" "$DESC_STEP_COMMIT" "$APPROVAL")
+rc=$(run_hook "$INPUT" SUPERPOWERS_WORKFLOW_GUARD=0)
+assert "exit code" "0" "$rc"
 echo ""
 
 echo "=== Summary: $FAILED failure(s) ==="

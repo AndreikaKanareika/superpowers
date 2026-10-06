@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse hook on TaskCreate: block per-task Commit steps in plan tasks when
-# the project opted in to "commitStrategy": "at-end" (workflow.json).
+# the project opted in to "commitStrategy": "at-end" or "only-by-user-approval"
+# (workflow.json).
 #
 # The at-end strategy (docs/workflow-config-flow.md) is delivered via the
 # session-start notice, but the writing-plans template still models a
@@ -9,11 +10,14 @@
 # the drift at TaskCreate time with a self-teaching block, same pattern as
 # pre-taskcreate-model-tier.
 #
-# Exempt: the ONE final "Commit the full implementation" task the strategy
-# requires (matched on subject; blockedBy is not visible at TaskCreate time).
+# Exempt (at-end only): the ONE final "Commit the full implementation" task the
+# strategy requires (matched on subject; blockedBy is not visible at TaskCreate
+# time). only-by-user-approval has no exemption - plans carry no commit action
+# at all; the commit happens only after the user approves it at plan end.
 #
 # Fail-open by design: missing/unparseable workflow.json, any commitStrategy
-# value other than "at-end", or a non-plan-shaped task → dormant (allow).
+# value other than "at-end"/"only-by-user-approval", or a non-plan-shaped task
+# → dormant (allow).
 #
 # Kill switch: SUPERPOWERS_WORKFLOW_GUARD=0 to disable.
 
@@ -67,10 +71,10 @@ if ! jq empty "$WORKFLOW_FILE" 2>/dev/null; then
     echo "$ALLOW"; exit 0
 fi
 
-# 4. Only "at-end" activates the gate; absent key or any other value →
-#    per-task default, byte-identical vanilla behavior.
+# 4. Only "at-end" and "only-by-user-approval" activate the gate; absent key or
+#    any other value → per-task default, byte-identical vanilla behavior.
 COMMIT_STRATEGY=$(jq -r '.commitStrategy // ""' "$WORKFLOW_FILE" 2>/dev/null | tr -d '\r'; exit "${PIPESTATUS[0]}")
-if [[ "$COMMIT_STRATEGY" != "at-end" ]]; then
+if [[ "$COMMIT_STRATEGY" != "at-end" && "$COMMIT_STRATEGY" != "only-by-user-approval" ]]; then
     trace "?" "skip" "strategy='$COMMIT_STRATEGY'"
     echo "$ALLOW"; exit 0
 fi
@@ -92,7 +96,9 @@ fi
 #    Anchored: the phrase must BE the subject (optional "Task N:" prefix and
 #    trailing period allowed); a subject merely containing it mid-sentence is
 #    not exempt, so a real per-task commit cannot hide behind a verbose title.
-if printf '%s' "$SUBJECT" | grep -qiE '^[ ]*(task[ ]*[0-9]+[.:][ ]*)?commit the full implementation[.!]?[ ]*$'; then
+#    only-by-user-approval has no final commit task, so nothing is exempt.
+if [[ "$COMMIT_STRATEGY" == "at-end" ]] \
+   && printf '%s' "$SUBJECT" | grep -qiE '^[ ]*(task[ ]*[0-9]+[.:][ ]*)?commit the full implementation[.!]?[ ]*$'; then
     trace "?" "pass" "final-commit-task subject=$SUBJECT"
     echo "$ALLOW"; exit 0
 fi
@@ -118,7 +124,37 @@ if [[ -z "$COMMIT_SIGNAL" ]]; then
 fi
 
 # 8. BLOCK with self-teaching message.
-trace "?" "block" "commit-step signal=$COMMIT_SIGNAL subject=$SUBJECT"
+trace "?" "block" "commit-step signal=$COMMIT_SIGNAL strategy=$COMMIT_STRATEGY subject=$SUBJECT"
+
+if [[ "$COMMIT_STRATEGY" == "only-by-user-approval" ]]; then
+{
+    echo "PLAN TASK CARRIES A COMMIT STEP (only-by-user-approval strategy active)"
+    echo ""
+    echo "This project sets \"commitStrategy\": \"only-by-user-approval\" ($WORKFLOW_LABEL):"
+    echo "nothing is committed without the user's explicit approval. The TaskCreate"
+    echo "for '$SUBJECT' is a plan task whose steps contain a commit action"
+    echo "($COMMIT_SIGNAL)."
+    echo ""
+    echo "Fix BOTH artifacts before retrying:"
+    echo "  1. In the plan .md: remove the Commit step from EVERY task's Steps. Do"
+    echo "     NOT add a final commit task - plans carry no commit action at all."
+    echo "  2. In this TaskCreate description: drop the commit step the same way."
+    echo ""
+    echo "At dispatch time, tell implementer subagents NOT to commit - they leave"
+    echo "all changes in the working tree and reviewers review the uncommitted"
+    echo "diff. When the plan is complete, ASK the user (AskUserQuestion) with the"
+    echo "proposed commit message; run git commit only on an explicit yes."
+    echo ""
+    echo "Options:"
+    echo "  1. Re-issue TaskCreate without the commit step."
+    echo "  2. If commits without approval are actually wanted here, the user can"
+    echo "     change \"commitStrategy\" in $WORKFLOW_LABEL (or delete the file)."
+    echo ""
+    echo "Full rationale: docs/workflow-config-flow.md."
+    echo "(Runtime disable: SUPERPOWERS_WORKFLOW_GUARD=0. Trace log: $TRACE_LOG)"
+} >&2
+exit 2
+fi
 
 {
     echo "PLAN TASK CARRIES A PER-TASK COMMIT STEP (at-end strategy active)"
